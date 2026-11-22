@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/data/app_scope.dart';
 import '../../core/models/models.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/common.dart';
 
 /// A single over-the-counter medicine available for delivery.
 class Medicine {
@@ -166,7 +167,7 @@ class _PharmacyScreenState extends State<PharmacyScreen> {
     setState(_cart.clear);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Order placed — ₵${total.toStringAsFixed(2)}'),
+        content: Text('Order placed — ${cedis(total)}'),
         backgroundColor: AppColors.success,
       ),
     );
@@ -254,7 +255,7 @@ class _PharmacyScreenState extends State<PharmacyScreen> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                '${med.unit} · ₵${med.price.toStringAsFixed(0)}',
+                                '${med.unit} · ${cedis(med.price)}',
                                 style: const TextStyle(
                                   fontSize: 12,
                                   color: AppColors.textSecondary,
@@ -308,8 +309,7 @@ class _PharmacyScreenState extends State<PharmacyScreen> {
                     minimumSize: const Size.fromHeight(52),
                   ),
                   child: Text(
-                    'Checkout · $_cartCount items · '
-                    '₵${_cartTotal.toStringAsFixed(2)}',
+                    'Checkout · $_cartCount items · ${cedis(_cartTotal)}',
                   ),
                 ),
               ),

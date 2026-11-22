@@ -195,6 +195,15 @@ class AppRepository extends ChangeNotifier {
   double _balance = 245.50;
   double get balance => _balance;
 
+  /// Rounds a cedi amount to whole pesewas.
+  ///
+  /// Binary floating point cannot represent 0.1 exactly, so repeated
+  /// additions drift (245.50 + 0.1 + 0.2 => 245.79999999999998). Every
+  /// balance mutation funnels through here so the wallet never shows or
+  /// persists a sub-pesewa remainder.
+  static double _roundCedis(double value) =>
+      (value * 100).roundToDouble() / 100;
+
   final List<WalletTransaction> _transactions = [
     WalletTransaction(
       id: 't1',
@@ -233,8 +242,8 @@ class AppRepository extends ChangeNotifier {
   List<WalletTransaction> get transactions => List.unmodifiable(_transactions);
 
   void topUp(double amount) {
-    if (amount <= 0) return;
-    _balance += amount;
+    if (!amount.isFinite || amount <= 0) return;
+    _balance = _roundCedis(_balance + amount);
     _transactions.insert(
       0,
       WalletTransaction(
@@ -251,8 +260,8 @@ class AppRepository extends ChangeNotifier {
   }
 
   bool charge(double amount, {required String title, String subtitle = ''}) {
-    if (amount <= 0 || amount > _balance) return false;
-    _balance -= amount;
+    if (!amount.isFinite || amount <= 0 || amount > _balance) return false;
+    _balance = _roundCedis(_balance - amount);
     _transactions.insert(
       0,
       WalletTransaction(
@@ -311,7 +320,8 @@ class AppRepository extends ChangeNotifier {
 
   List<CartLine> get cartLines => List.unmodifiable(_cart.values);
   int get cartCount => _cart.values.fold(0, (sum, l) => sum + l.quantity);
-  double get cartTotal => _cart.values.fold(0.0, (sum, l) => sum + l.subtotal);
+  double get cartTotal =>
+      _roundCedis(_cart.values.fold(0.0, (sum, l) => sum + l.subtotal));
 
   void addToCart(Product product) {
     final existing = _cart[product.id];

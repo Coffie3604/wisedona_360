@@ -46,9 +46,9 @@ class WalletScreen extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             FilledButton(
-              onPressed: () =>
-                  Navigator.of(ctx)
-                      .pop(double.tryParse(controller.text.trim())),
+              onPressed: () => Navigator.of(ctx).pop(
+                parseCedis(controller.text),
+              ),
               child: const Text('Add funds'),
             ),
           ],

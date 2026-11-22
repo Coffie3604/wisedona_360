@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for Firebase Auth / Firestore in release builds.
+         Flutter injects this for debug builds only. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="wisedona_360"
         android:name="${applicationName}"

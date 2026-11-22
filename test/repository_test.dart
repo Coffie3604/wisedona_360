@@ -90,6 +90,35 @@ void main() {
       expect(repo.transactions.first.isCredit, isFalse);
     });
 
+    test('topUp ignores non-finite amounts', () {
+      final repo = AppRepository();
+      final before = repo.balance;
+      repo.topUp(double.nan);
+      repo.topUp(double.infinity);
+      repo.topUp(double.negativeInfinity);
+      expect(repo.balance, before);
+    });
+
+    test('charge rejects non-finite amounts without touching the balance', () {
+      final repo = AppRepository();
+      final before = repo.balance;
+      expect(repo.charge(double.nan, title: 'NaN'), isFalse);
+      expect(repo.charge(double.infinity, title: 'Inf'), isFalse);
+      expect(repo.balance, before);
+      expect(repo.transactions.first.title, isNot('NaN'));
+    });
+
+    test('balance stays exact to the pesewa across repeated mutations', () {
+      final repo = AppRepository();
+      repo.topUp(0.1);
+      repo.topUp(0.2);
+      // 245.50 + 0.1 + 0.2 drifts to 245.79999999999998 without rounding.
+      expect(repo.balance, 245.80);
+
+      expect(repo.charge(0.3, title: 'Exact'), isTrue);
+      expect(repo.balance, 245.50);
+    });
+
     test('balance survives a reload', () async {
       final repo = AppRepository();
       repo.topUp(100);
@@ -113,6 +142,15 @@ void main() {
       expect(repo.cartCount, 2);
       expect(repo.cartLines.single.quantity, 2);
       expect(repo.cartTotal, product.price * 2);
+    });
+
+    test('cartTotal is exact to the pesewa', () {
+      final repo = AppRepository();
+      // 48.50 x 3 = 145.50; naive float sums can land on 145.49999999999997.
+      for (var i = 0; i < 3; i++) {
+        repo.addToCart(AppRepository.products[1]);
+      }
+      expect(repo.cartTotal, 145.50);
     });
 
     test('removing the last unit drops the line', () {

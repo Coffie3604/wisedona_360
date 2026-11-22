@@ -2,8 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// Formats an amount as Ghana Cedis.
-String cedis(double amount) => '₵${amount.toStringAsFixed(2)}';
+/// Formats an amount as Ghana Cedis, e.g. `₵12.50` or `-₵12.50`.
+///
+/// The sign is placed before the symbol so negative amounts read correctly,
+/// and non-finite values render as `₵0.00` rather than `₵NaN`.
+String cedis(double amount) {
+  if (!amount.isFinite) return '₵0.00';
+  final sign = amount < 0 ? '-' : '';
+  return '$sign₵${amount.abs().toStringAsFixed(2)}';
+}
 
 /// Section heading used across the app.
 class SectionHeader extends StatelessWidget {
@@ -181,3 +188,18 @@ String relativeTime(DateTime time) {
   if (diff.inDays < 7) return '${diff.inDays}d ago';
   return '${time.day}/${time.month}/${time.year}';
 }
+
+/// Parses user-entered Cedis into a finite, non-negative amount.
+///
+/// Returns `null` for anything that is not a plain decimal number, so
+/// `NaN`, `Infinity`, `1e5` and `1.2.3` are rejected instead of silently
+/// becoming a wallet balance.
+double? parseCedis(String raw) {
+  final text = raw.trim();
+  final shape = RegExp(r'^[0-9]+(\.[0-9]{1,2})?\z');
+  if (!shape.hasMatch(text)) return null;
+  final value = double.tryParse(text);
+  if (value == null || !value.isFinite) return null;
+  return value;
+}
+
