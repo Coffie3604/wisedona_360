@@ -94,6 +94,10 @@ class AuthService {
         return 'No internet connection.';
       case 'operation-not-allowed':
         return 'Email sign-in is not enabled for this project.';
+      case 'invalid-api-key':
+      case 'app-not-authorized':
+        return 'This build is not registered with Firebase. '
+            'Add the Android/iOS app in the Firebase console.';
       default:
         return e.message ?? 'Authentication failed.';
     }

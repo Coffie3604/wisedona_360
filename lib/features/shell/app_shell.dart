@@ -5,7 +5,7 @@ import '../delivery/delivery_screen.dart';
 import '../home/home_screen.dart';
 import '../mart/mart_screen.dart';
 import '../ride/ride_screen.dart';
-import '../wallet/wallet_screen.dart';
+import '../pharmacy/pharmacy_screen.dart';
 
 /// Bottom-navigation shell hosting the five main tabs.
 class AppShell extends StatefulWidget {
@@ -27,7 +27,7 @@ class _AppShellState extends State<AppShell> {
       const RideScreen(),
       const DeliveryScreen(),
       const MartScreen(),
-      const WalletScreen(),
+      const PharmacyScreen(),
     ];
 
     return Scaffold(
@@ -59,12 +59,9 @@ class _AppShellState extends State<AppShell> {
             label: 'WiseMart',
           ),
           NavigationDestination(
-            icon: Icon(Icons.account_balance_wallet_outlined),
-            selectedIcon: Icon(
-              Icons.account_balance_wallet,
-              color: AppColors.primary,
-            ),
-            label: 'Wallet',
+            icon: Icon(Icons.local_pharmacy_outlined),
+            selectedIcon: Icon(Icons.local_pharmacy, color: AppColors.primary),
+            label: 'Pharmacy',
           ),
         ],
       ),

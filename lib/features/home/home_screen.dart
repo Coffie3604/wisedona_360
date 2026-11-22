@@ -5,6 +5,7 @@ import '../../core/models/models.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../profile/profile_screen.dart';
+import '../wallet/wallet_screen.dart';
 
 /// Home tab: greeting, wallet summary, quick actions and recent activity.
 class HomeScreen extends StatelessWidget {
@@ -28,7 +29,14 @@ class HomeScreen extends StatelessWidget {
             children: [
               _Header(name: user?.name ?? 'Guest'),
               const SizedBox(height: 20),
-              _WalletCard(balance: repo.balance, onTap: () => onNavigate(4)),
+              _WalletCard(
+                balance: repo.balance,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const WalletScreen(),
+                  ),
+                ),
+              ),
               const SizedBox(height: 24),
               const SectionHeader(
                 title: 'What would you like to do?',
@@ -64,9 +72,9 @@ class HomeScreen extends StatelessWidget {
                     onTap: () => onNavigate(3),
                   ),
                   ActionCard(
-                    icon: Icons.account_balance_wallet,
-                    title: 'My Wallet',
-                    description: 'Top up & pay',
+                    icon: Icons.local_pharmacy,
+                    title: 'Pharmacy',
+                    description: 'Medicine delivered',
                     color: const Color(0xFF7C3AED),
                     onTap: () => onNavigate(4),
                   ),
