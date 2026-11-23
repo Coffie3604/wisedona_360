@@ -124,6 +124,28 @@ class WalletTransaction {
   final DateTime timestamp;
 
   bool get isCredit => type == TransactionType.credit;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'subtitle': subtitle,
+        'amount': amount,
+        'type': type.name,
+        'timestamp': timestamp.toIso8601String(),
+      };
+
+  factory WalletTransaction.fromJson(Map<String, dynamic> json) =>
+      WalletTransaction(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        subtitle: json['subtitle'] as String,
+        amount: (json['amount'] as num).toDouble(),
+        type: TransactionType.values.firstWhere(
+          (t) => t.name == json['type'],
+          orElse: () => TransactionType.debit,
+        ),
+        timestamp: DateTime.parse(json['timestamp'] as String),
+      );
 }
 
 enum ActivityKind { ride, delivery, mart, wallet }
@@ -144,6 +166,31 @@ class ActivityItem {
   final ActivityKind kind;
   final DateTime timestamp;
   final double? amount;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'subtitle': subtitle,
+        'kind': kind.name,
+        'timestamp': timestamp.toIso8601String(),
+        'amount': amount,
+      };
+
+  /// Rebuilds an item from [toJson] output.
+  ///
+  /// Unknown [ActivityKind] values fall back to [ActivityKind.wallet] so a
+  /// record written by a newer build never crashes an older one.
+  factory ActivityItem.fromJson(Map<String, dynamic> json) => ActivityItem(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        subtitle: json['subtitle'] as String,
+        kind: ActivityKind.values.firstWhere(
+          (k) => k.name == json['kind'],
+          orElse: () => ActivityKind.wallet,
+        ),
+        timestamp: DateTime.parse(json['timestamp'] as String),
+        amount: (json['amount'] as num?)?.toDouble(),
+      );
 }
 
 /// A saved place (home, work, etc.).

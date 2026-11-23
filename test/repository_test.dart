@@ -183,5 +183,61 @@ void main() {
       expect(repo.activity.length, before + 1);
       expect(repo.activity.first.id, 'new');
     });
+
+    test('activity survives a restart', () async {
+      final repo = AppRepository();
+      await repo.load();
+      repo.recordActivity(
+        ActivityItem(
+          id: 'persisted',
+          title: 'WiseMart Order',
+          subtitle: '3 items',
+          kind: ActivityKind.mart,
+          timestamp: DateTime.now(),
+          amount: 42.75,
+        ),
+      );
+      // Let the fire-and-forget write settle.
+      await Future<void>.delayed(Duration.zero);
+
+      final reloaded = AppRepository();
+      await reloaded.load();
+
+      expect(reloaded.activity.first.id, 'persisted');
+      expect(reloaded.activity.first.amount, 42.75);
+      expect(reloaded.activity.first.kind, ActivityKind.mart);
+    });
+  });
+
+  group('wallet history', () {
+    test('a charge is still on record after a restart', () async {
+      final repo = AppRepository();
+      await repo.load();
+      final before = repo.balance;
+
+      expect(repo.charge(10.00, title: 'WiseMart Order'), isTrue);
+      await Future<void>.delayed(Duration.zero);
+
+      final reloaded = AppRepository();
+      await reloaded.load();
+
+      expect(reloaded.balance, before - 10.00);
+      expect(reloaded.transactions.first.title, 'WiseMart Order');
+      expect(reloaded.transactions.first.amount, 10.00);
+      expect(reloaded.transactions.first.type, TransactionType.debit);
+    });
+
+    test('a corrupt history record does not wipe the rest', () async {
+      SharedPreferences.setMockInitialValues({
+        'history.activity':
+            '[{"id":"ok","title":"Kept","subtitle":"","kind":"mart",'
+                '"timestamp":"2024-01-01T00:00:00.000","amount":1.0},'
+                '{"id":"bad"}]',
+      });
+      final repo = AppRepository();
+      await repo.load();
+
+      expect(repo.activity.first.id, 'ok');
+    });
   });
 }

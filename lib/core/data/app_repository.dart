@@ -17,6 +17,8 @@ class AppRepository extends ChangeNotifier {
 
   static const _kBalance = 'wallet.balance';
   static const _kUser = 'session.user';
+  static const _kActivity = 'history.activity';
+  static const _kTransactions = 'wallet.transactions';
 
   SharedPreferences? _prefs;
 
@@ -50,11 +52,58 @@ class AppRepository extends ChangeNotifier {
         );
       }
       final savedBalance = _prefs!.getDouble(_kBalance);
-      if (savedBalance != null) _balance = savedBalance;
+      if (savedBalance != null && savedBalance.isFinite) {
+        _balance = _roundCedis(savedBalance);
+      }
+      _restoreList(_kActivity, _activity, ActivityItem.fromJson);
+      _restoreList(_kTransactions, _transactions, WalletTransaction.fromJson);
     } catch (e) {
       debugPrint('AppRepository.load failed: $e');
     }
     notifyListeners();
+  }
+
+  /// Replaces [target] with the persisted records under [key].
+  ///
+  /// A single malformed record must not discard the whole history, so each
+  /// entry is decoded independently and bad ones are skipped.
+  void _restoreList<T>(
+    String key,
+    List<T> target,
+    T Function(Map<String, dynamic>) decode,
+  ) {
+    final raw = _prefs?.getString(key);
+    if (raw == null) return;
+    try {
+      final decoded = jsonDecode(raw) as List<dynamic>;
+      final restored = <T>[];
+      for (final entry in decoded) {
+        try {
+          restored.add(decode(entry as Map<String, dynamic>));
+        } catch (e) {
+          debugPrint('AppRepository._restoreList skipped record: $e');
+        }
+      }
+      if (restored.isNotEmpty) {
+        target
+          ..clear()
+          ..addAll(restored);
+      }
+    } catch (e) {
+      debugPrint('AppRepository._restoreList($key) failed: $e');
+    }
+  }
+
+  Future<void> _persistList(
+    String key,
+    List<Map<String, dynamic>> Function() encode,
+  ) async {
+    try {
+      final prefs = await _store();
+      await prefs?.setString(key, jsonEncode(encode()));
+    } catch (e) {
+      debugPrint('AppRepository._persistList($key) failed: $e');
+    }
   }
 
   Future<void> _persistUser() async {
@@ -256,6 +305,7 @@ class AppRepository extends ChangeNotifier {
       ),
     );
     _persistBalance();
+    _persistTransactions();
     notifyListeners();
   }
 
@@ -274,6 +324,7 @@ class AppRepository extends ChangeNotifier {
       ),
     );
     _persistBalance();
+    _persistTransactions();
     notifyListeners();
     return true;
   }
@@ -311,8 +362,19 @@ class AppRepository extends ChangeNotifier {
 
   void recordActivity(ActivityItem item) {
     _activity.insert(0, item);
+    _persistActivity();
     notifyListeners();
   }
+
+  Future<void> _persistActivity() => _persistList(
+        _kActivity,
+        () => _activity.map((a) => a.toJson()).toList(),
+      );
+
+  Future<void> _persistTransactions() => _persistList(
+        _kTransactions,
+        () => _transactions.map((t) => t.toJson()).toList(),
+      );
 
   // ------------------------------------------------------------------ cart
 
