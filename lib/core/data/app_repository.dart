@@ -6,6 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../firebase/auth_service.dart';
 import '../models/models.dart';
+import '../models/order.dart';
+import '../payments/payment_gateway.dart';
+import 'firestore_service.dart';
 
 /// In-memory data source for the Wisedona app.
 ///
@@ -149,6 +152,19 @@ class AppRepository extends ChangeNotifier {
   AuthService? _auth;
   set authService(AuthService? value) => _auth = value;
 
+  /// Optional Firestore backend. When null every write stays local, which is
+  /// what the widget tests rely on.
+  FirestoreService? _cloud;
+  set firestoreService(FirestoreService? value) => _cloud = value;
+  FirestoreService? get firestore => _cloud;
+
+  /// Payment rail used for top-ups and driver payouts. Defaults to the mock so
+  /// the app runs end-to-end without provider credentials; a production build
+  /// injects a Paystack or Hubtel gateway here.
+  PaymentGateway _payments = MockPaymentGateway();
+  PaymentGateway get paymentGateway => _payments;
+  set paymentGateway(PaymentGateway value) => _payments = value;
+
   /// Mirrors a Firebase [User] into the local [AppUser] model.
   void syncFromFirebase(User? fbUser) {
     if (fbUser == null) {
@@ -290,7 +306,60 @@ class AppRepository extends ChangeNotifier {
 
   List<WalletTransaction> get transactions => List.unmodifiable(_transactions);
 
+  /// Starts a top-up against the configured payment rail.
+  ///
+  /// Returns the [PaymentIntent] so the UI can show "approve the prompt on
+  /// your phone". The balance is **not** credited here — a pending MoMo prompt
+  /// can still be declined. Call [confirmTopUp] with the reference to settle.
+  Future<PaymentIntent> startTopUp({
+    required double amount,
+    required String phone,
+  }) async {
+    if (!amount.isFinite || amount <= 0) {
+      throw const PaymentException('Enter an amount greater than zero.');
+    }
+    return _payments.initiateTopUp(
+      amountCedis: amount,
+      phone: phone,
+      email: _user?.email,
+    );
+  }
+
+  /// Polls the provider and credits the wallet once payment succeeds.
+  ///
+  /// Crediting happens exactly once: a second call for an already-credited
+  /// reference is a no-op, so a double-tap on "Check status" cannot double the
+  /// balance.
+  Future<PaymentIntent> confirmTopUp(String reference) async {
+    final intent = await _payments.verify(reference);
+    if (intent.status != PaymentStatus.succeeded) return intent;
+    if (_creditedReferences.contains(reference)) return intent;
+    _creditedReferences.add(reference);
+    _credit(intent.amountCedis, subtitle: _payments.name);
+    return intent;
+  }
+
+  /// References already applied to the balance, guarding against replays.
+  final Set<String> _creditedReferences = {};
+
+  /// Credits the wallet directly, bypassing the payment rail.
+  ///
+  /// **Not a customer path.** This performs no payment: it exists only for
+  /// admin-issued credits and for tests that need a funded wallet. Every
+  /// customer top-up must go through [startTopUp] + [confirmTopUp] so the
+  /// balance only moves once a provider confirms the money arrived.
+  ///
+  /// The credit is tagged `Admin credit` in the ledger so a bypassed payment
+  /// is always visible in transaction history rather than looking like a
+  /// normal MoMo top-up.
+  @visibleForTesting
   void topUp(double amount) {
+    if (!amount.isFinite || amount <= 0) return;
+    _credit(amount, subtitle: 'Admin credit');
+  }
+
+  /// Adds funds to the wallet. Only called after a provider confirms payment.
+  void _credit(double amount, {required String subtitle}) {
     if (!amount.isFinite || amount <= 0) return;
     _balance = _roundCedis(_balance + amount);
     _transactions.insert(
@@ -298,7 +367,7 @@ class AppRepository extends ChangeNotifier {
       WalletTransaction(
         id: 't_${DateTime.now().microsecondsSinceEpoch}',
         title: 'Wallet Top-up',
-        subtitle: 'Mobile Money',
+        subtitle: subtitle,
         amount: amount,
         type: TransactionType.credit,
         timestamp: DateTime.now(),
@@ -306,6 +375,11 @@ class AppRepository extends ChangeNotifier {
     );
     _persistBalance();
     _persistTransactions();
+    final uid = _user?.id;
+    if (uid != null) {
+      _cloud?.saveBalance(uid, _balance);
+      _cloud?.recordTransaction(uid, _transactions.first);
+    }
     notifyListeners();
   }
 
@@ -325,8 +399,240 @@ class AppRepository extends ChangeNotifier {
     );
     _persistBalance();
     _persistTransactions();
+    final uid = _user?.id;
+    if (uid != null) {
+      _cloud?.saveBalance(uid, _balance);
+      _cloud?.recordTransaction(uid, _transactions.first);
+    }
     notifyListeners();
     return true;
+  }
+
+  // ---------------------------------------------------------------- orders
+
+  final List<Order> _orders = [];
+  List<Order> get orders => List.unmodifiable(_orders);
+
+  /// Orders still awaiting a driver.
+  List<Order> get openOrders =>
+      _orders.where((o) => o.status == OrderStatus.pending).toList();
+
+  /// Orders assigned to [driverId] that are not yet settled.
+  List<Order> ordersForDriver(String driverId) => _orders
+      .where((o) => o.driverId == driverId && o.isOpen)
+      .toList(growable: false);
+
+  /// Places an order and charges the customer.
+  ///
+  /// Returns the created [Order], or null if the wallet could not cover the
+  /// fare. The order is published to Firestore so drivers on other devices see
+  /// it in their feed.
+  Future<Order?> placeOrder({
+    required OrderKind kind,
+    required String title,
+    required String pickup,
+    required String dropoff,
+    required double fare,
+    String? optionId,
+    double distanceKm = 0,
+  }) async {
+    final customer = _user;
+    if (customer == null) return null;
+    if (!charge(fare, title: title, subtitle: 'Wisedona $kind')) return null;
+
+    final order = Order(
+      id: 'o_${DateTime.now().microsecondsSinceEpoch}',
+      customerId: customer.id,
+      kind: kind,
+      title: title,
+      pickup: pickup,
+      dropoff: dropoff,
+      fare: _roundCedis(fare),
+      status: OrderStatus.pending,
+      createdAt: DateTime.now(),
+      optionId: optionId,
+      distanceKm: distanceKm,
+    );
+    _orders.insert(0, order);
+    recordActivity(
+      ActivityItem(
+        id: order.id,
+        title: title,
+        subtitle: 'Finding a driver',
+        kind: _activityKindFor(kind),
+        timestamp: order.createdAt,
+        amount: order.fare,
+      ),
+    );
+    await _cloud?.createOrder(order);
+    notifyListeners();
+    return order;
+  }
+
+  /// Assigns [driver] to [orderId].
+  ///
+  /// Returns false if the order was already taken — the Firestore transaction
+  /// is the source of truth when a backend is configured, so two drivers
+  /// racing for the same order cannot both win.
+  Future<bool> acceptOrder({
+    required String orderId,
+    required Driver driver,
+  }) async {
+    if (!driver.verified) return false;
+    final index = _orders.indexWhere((o) => o.id == orderId);
+    if (index < 0) return false;
+    final order = _orders[index];
+    if (order.status != OrderStatus.pending) return false;
+
+    final cloud = _cloud;
+    if (cloud != null) {
+      final won = await cloud.acceptOrder(
+        orderId: orderId,
+        driverId: driver.id,
+        driverName: driver.name,
+      );
+      if (!won) return false;
+    }
+    _orders[index] = order.copyWith(
+      status: OrderStatus.accepted,
+      driverId: driver.id,
+      driverName: driver.name,
+    );
+    notifyListeners();
+    return true;
+  }
+
+  /// Advances an order's status.
+  Future<void> advanceOrder(String orderId, OrderStatus status) async {
+    final index = _orders.indexWhere((o) => o.id == orderId);
+    if (index < 0) return;
+    _orders[index] = _orders[index].copyWith(status: status);
+    await _cloud?.updateStatus(orderId, status);
+    notifyListeners();
+  }
+
+  /// Completes an order: takes the platform's commission and pays the driver.
+  ///
+  /// Returns the [CommissionSplit] recorded, or null if the order was not in a
+  /// completable state. Settlement is idempotent — completing twice does not
+  /// pay the driver twice.
+  Future<CommissionSplit?> completeOrder(String orderId) async {
+    final index = _orders.indexWhere((o) => o.id == orderId);
+    if (index < 0) return null;
+    final order = _orders[index];
+    if (order.status == OrderStatus.completed) return null;
+    if (order.status == OrderStatus.cancelled) return null;
+
+    final split = CommissionSplit(
+      orderId: order.id,
+      gross: order.fare,
+      commission: order.commission,
+      driverPayout: order.driverPayout,
+      rate: order.commissionRate,
+      settledAt: DateTime.now(),
+    );
+
+    _orders[index] = order.copyWith(status: OrderStatus.completed);
+    _commissions.insert(0, split);
+    _earned = _roundCedis(_earned + split.commission);
+
+    final driverId = order.driverId;
+    if (driverId != null) {
+      final dIndex = _drivers.indexWhere((d) => d.id == driverId);
+      if (dIndex >= 0) {
+        _drivers[dIndex] = _drivers[dIndex].copyWith(
+          tripsCompleted: _drivers[dIndex].tripsCompleted + 1,
+        );
+      }
+    }
+
+    await _cloud?.recordCommission(split);
+    await _cloud?.updateStatus(order.id, OrderStatus.completed);
+    notifyListeners();
+    return split;
+  }
+
+  /// Cancels an order and refunds the customer in full.
+  Future<void> cancelOrder(String orderId) async {
+    final index = _orders.indexWhere((o) => o.id == orderId);
+    if (index < 0) return;
+    final order = _orders[index];
+    if (order.isSettled) return;
+    _orders[index] = order.copyWith(status: OrderStatus.cancelled);
+    _credit(order.fare, subtitle: 'Refund • ${order.title}');
+    await _cloud?.updateStatus(orderId, OrderStatus.cancelled);
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------ commission
+
+  final List<CommissionSplit> _commissions = [];
+  List<CommissionSplit> get commissions => List.unmodifiable(_commissions);
+
+  double _earned = 0;
+
+  /// Total platform commission earned this session.
+  double get commissionEarned => _earned;
+
+  // --------------------------------------------------------------- drivers
+
+  final List<Driver> _drivers = [
+    const Driver(
+      id: 'd1',
+      name: 'Kwame Mensah',
+      vehicle: 'Toyota Corolla • Silver',
+      plate: 'GT 4821-24',
+      rating: 4.9,
+      tripsCompleted: 312,
+      isOnline: true,
+      verified: true,
+    ),
+    const Driver(
+      id: 'd2',
+      name: 'Ama Boateng',
+      vehicle: 'Hyundai i10 • White',
+      plate: 'GE 1190-23',
+      rating: 4.8,
+      tripsCompleted: 187,
+      isOnline: true,
+      verified: true,
+    ),
+    const Driver(
+      id: 'd3',
+      name: 'Yaw Owusu',
+      vehicle: 'Kia Picanto • Blue',
+      plate: 'GR 7734-25',
+      rating: 4.7,
+      tripsCompleted: 94,
+      isOnline: false,
+      verified: true,
+    ),
+  ];
+
+  List<Driver> get drivers => List.unmodifiable(_drivers);
+
+  /// Drivers eligible for dispatch: online and KYC-verified.
+  List<Driver> get availableDrivers =>
+      _drivers.where((d) => d.isOnline && d.verified).toList(growable: false);
+
+  void setDriverOnline(String driverId, bool online) {
+    final index = _drivers.indexWhere((d) => d.id == driverId);
+    if (index < 0) return;
+    _drivers[index] = _drivers[index].copyWith(isOnline: online);
+    _cloud?.upsertDriver(_drivers[index]);
+    notifyListeners();
+  }
+
+  static ActivityKind _activityKindFor(OrderKind kind) {
+    switch (kind) {
+      case OrderKind.ride:
+        return ActivityKind.ride;
+      case OrderKind.delivery:
+        return ActivityKind.delivery;
+      case OrderKind.mart:
+      case OrderKind.pharmacy:
+        return ActivityKind.mart;
+    }
   }
 
   // --------------------------------------------------------------- activity

@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "419509950860",
+    "project_id": "wisedona-360",
+    "storage_bucket": "wisedona-360.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:419509950860:android:e3fb899ea1ad4212639ea9",
+        "android_client_info": {
+          "package_name": "com.wisedona.wisedona_360"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "419509950860-7gmi8aqmv01laiaa146tsjjevi206k6b.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.wisedona.wisedona_360",
+            "certificate_hash": "e58a55bcfb7e44a0a88dc1743785e6f7a82e34af"
+          }
+        },
+        {
+          "client_id": "419509950860-evtvc6asaea7emi98l7t1i6og4rd7oi8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDrR_dgnW_4GURwdwg3VdsbJsLOH9Lt9K4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "419509950860-evtvc6asaea7emi98l7t1i6og4rd7oi8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
